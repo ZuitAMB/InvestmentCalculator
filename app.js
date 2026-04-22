@@ -1,18 +1,66 @@
 // Investment Calculator — runs entirely in the browser.
 
-const fmtCurrency = new Intl.NumberFormat(undefined, {
-  style: 'currency',
-  currency: 'EUR',
-  maximumFractionDigits: 0,
-});
+// ----- i18n state -----
+let currentLang = localStorage.getItem('investcalc.lang') || detectLang();
+let t = I18N[currentLang] || I18N.en;
 
-const fmtCurrencyPrecise = new Intl.NumberFormat(undefined, {
-  style: 'currency',
-  currency: 'EUR',
-  maximumFractionDigits: 2,
-});
+function detectLang() {
+  const nav = (navigator.language || 'en').toLowerCase();
+  for (const key of Object.keys(I18N)) {
+    if (nav.startsWith(key)) return key;
+  }
+  return 'en';
+}
 
-// Pair a number input with a range slider so they stay in sync.
+let fmtCurrency;
+let fmtCurrencyPrecise;
+
+function buildFormatters() {
+  fmtCurrency = new Intl.NumberFormat(t._locale, {
+    style: 'currency',
+    currency: 'EUR',
+    maximumFractionDigits: 0,
+  });
+  fmtCurrencyPrecise = new Intl.NumberFormat(t._locale, {
+    style: 'currency',
+    currency: 'EUR',
+    maximumFractionDigits: 2,
+  });
+}
+
+function applyStaticTranslations() {
+  document.documentElement.lang = currentLang;
+  document.title = t.title.replace(/^[^\w]+/, '') || 'Investment Calculator';
+  document.querySelectorAll('[data-i18n]').forEach((el) => {
+    const key = el.getAttribute('data-i18n');
+    const val = t[key];
+    if (typeof val === 'string') el.textContent = val;
+  });
+}
+
+function buildLanguageSelect() {
+  const sel = document.getElementById('languageSelect');
+  sel.innerHTML = '';
+  for (const [code, data] of Object.entries(I18N)) {
+    const opt = document.createElement('option');
+    opt.value = code;
+    opt.textContent = data._name;
+    if (code === currentLang) opt.selected = true;
+    sel.appendChild(opt);
+  }
+  sel.addEventListener('change', () => {
+    currentLang = sel.value;
+    t = I18N[currentLang];
+    localStorage.setItem('investcalc.lang', currentLang);
+    buildFormatters();
+    applyStaticTranslations();
+    rebuildChartLabels();
+    update();
+  });
+}
+
+// ----- Input wiring -----
+
 function bindInputPair(numberId, rangeId, onChange) {
   const numberEl = document.getElementById(numberId);
   const rangeEl = document.getElementById(rangeId);
@@ -20,7 +68,6 @@ function bindInputPair(numberId, rangeId, onChange) {
   const syncFromNumber = () => {
     const v = parseFloat(numberEl.value);
     if (!Number.isNaN(v)) {
-      // Clamp range visually but allow number input beyond range max.
       const clamped = Math.min(Math.max(v, rangeEl.min), rangeEl.max);
       rangeEl.value = clamped;
     }
@@ -46,8 +93,7 @@ function readParams() {
 }
 
 /**
- * Simulate growth month-by-month.
- * Returns per-year snapshots + the year a milestone is first reached.
+ * Simulate growth month-by-month. Returns per-year snapshots and milestone years.
  */
 function simulate({ S, I, R, Y, F }) {
   const monthlyRate = Math.pow(1 + R / 100, 1 / 12) - 1;
@@ -60,7 +106,6 @@ function simulate({ S, I, R, Y, F }) {
   let balance = S;
   let totalContrib = S;
 
-  // Track yearly aggregates to detect milestone years.
   let yearReturns = 0;
   let yearContrib = 0;
   let milestone1Year = null;
@@ -85,7 +130,6 @@ function simulate({ S, I, R, Y, F }) {
       if (milestoneFYear === null && yearReturns > F * yearContrib && yearContrib > 0) {
         milestoneFYear = yearIdx;
       }
-      // Edge case: zero monthly investment — milestone trivially reached if any return exists.
       if (yearContrib === 0 && yearReturns > 0) {
         if (milestone1Year === null) milestone1Year = yearIdx;
         if (milestoneFYear === null) milestoneFYear = yearIdx;
@@ -107,7 +151,7 @@ function simulate({ S, I, R, Y, F }) {
   };
 }
 
-// ----- Chart setup -----
+// ----- Chart -----
 
 let chart;
 
@@ -128,7 +172,7 @@ function buildChart() {
       labels: [],
       datasets: [
         {
-          label: 'Net worth',
+          label: t.netWorth,
           data: [],
           borderColor: '#38bdf8',
           backgroundColor: networthGradient,
@@ -142,7 +186,7 @@ function buildChart() {
           pointHoverBorderWidth: 2,
         },
         {
-          label: 'Total contributed',
+          label: t.totalContributions,
           data: [],
           borderColor: '#818cf8',
           backgroundColor: contribGradient,
@@ -161,10 +205,7 @@ function buildChart() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      interaction: {
-        mode: 'index',
-        intersect: false,
-      },
+      interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: {
           labels: { color: '#e2e8f0', usePointStyle: true, padding: 16 },
@@ -178,29 +219,27 @@ function buildChart() {
           padding: 12,
           cornerRadius: 8,
           callbacks: {
-            title: (items) => `Year ${items[0].label}`,
-            label: (item) => {
-              const value = fmtCurrencyPrecise.format(item.parsed.y);
-              return ` ${item.dataset.label}: ${value}`;
-            },
+            title: (items) => t.yearLabel(items[0].label),
+            label: (item) => ` ${item.dataset.label}: ${fmtCurrencyPrecise.format(item.parsed.y)}`,
             afterBody: (items) => {
               if (items.length < 2) return '';
               const networth = items[0].parsed.y;
               const contrib = items[1].parsed.y;
               const interest = networth - contrib;
-              return `\n Interest earned: ${fmtCurrencyPrecise.format(interest)}`;
+              return `\n ${t.interestEarned}: ${fmtCurrencyPrecise.format(interest)}`;
             },
           },
         },
+        annotation: { annotations: {} },
       },
       scales: {
         x: {
-          title: { display: true, text: 'Years', color: '#94a3b8' },
+          title: { display: true, text: t.chartYears, color: '#94a3b8' },
           ticks: { color: '#94a3b8' },
           grid: { color: 'rgba(148, 163, 184, 0.08)' },
         },
         y: {
-          title: { display: true, text: 'Value (€)', color: '#94a3b8' },
+          title: { display: true, text: t.chartValue, color: '#94a3b8' },
           ticks: {
             color: '#94a3b8',
             callback: (v) => fmtCurrency.format(v),
@@ -212,6 +251,53 @@ function buildChart() {
   });
 }
 
+function rebuildChartLabels() {
+  if (!chart) return;
+  chart.data.datasets[0].label = t.netWorth;
+  chart.data.datasets[1].label = t.totalContributions;
+  chart.options.scales.x.title.text = t.chartYears;
+  chart.options.scales.y.title.text = t.chartValue;
+}
+
+function buildMilestoneAnnotations(result, params) {
+  const annotations = {};
+
+  const make = (year, color, label, position) => ({
+    type: 'line',
+    xMin: year,
+    xMax: year,
+    borderColor: color,
+    borderWidth: 2,
+    borderDash: [6, 4],
+    label: {
+      display: true,
+      content: label,
+      position, // 'end' = top, 'start' = bottom
+      yAdjust: position === 'end' ? 22 : -6,
+      backgroundColor: 'rgba(15, 23, 42, 0.92)',
+      borderColor: color,
+      borderWidth: 1,
+      borderRadius: 6,
+      color: '#e2e8f0',
+      font: { size: 12, weight: '600' },
+      padding: { top: 4, bottom: 4, left: 8, right: 8 },
+    },
+  });
+
+  if (result.milestone1Year !== null) {
+    annotations.m1 = make(result.milestone1Year, '#38bdf8', t.chartMilestone1, 'end');
+  }
+  if (result.milestoneFYear !== null) {
+    annotations.mF = make(
+      result.milestoneFYear,
+      '#a78bfa',
+      t.chartMilestoneF(params.F),
+      'start'
+    );
+  }
+  return annotations;
+}
+
 function update() {
   const params = readParams();
   const result = simulate(params);
@@ -219,38 +305,43 @@ function update() {
   chart.data.labels = result.labels;
   chart.data.datasets[0].data = result.networth;
   chart.data.datasets[1].data = result.contributed;
+  chart.options.plugins.annotation.annotations = buildMilestoneAnnotations(result, params);
   chart.update('none');
 
-  document.getElementById('finalValue').textContent =
-    fmtCurrency.format(result.finalBalance);
-  document.getElementById('totalContributed').textContent =
-    fmtCurrency.format(result.totalContributed);
+  document.getElementById('finalValue').textContent = fmtCurrency.format(result.finalBalance);
+  document.getElementById('totalContributed').textContent = fmtCurrency.format(result.totalContributed);
   document.getElementById('totalInterest').textContent =
     fmtCurrency.format(result.finalBalance - result.totalContributed);
 
-  document.getElementById('factorLabel').textContent = params.F.toString();
+  document.getElementById('milestone1Title').textContent = t.milestone1Title;
+  document.getElementById('milestone1Text').textContent = t.milestone1Text;
+  document.getElementById('milestoneFTitle').textContent = t.milestoneFTitle(params.F);
+  document.getElementById('milestoneFText').textContent = t.milestoneFText;
 
   const m1 = document.getElementById('milestone1Result');
   if (result.milestone1Year !== null) {
-    m1.textContent = `Reached in year ${result.milestone1Year}`;
+    m1.textContent = t.reachedYear(result.milestone1Year);
     m1.classList.remove('unreached');
   } else {
-    m1.textContent = `Not reached within ${params.Y} years`;
+    m1.textContent = t.notReached(params.Y);
     m1.classList.add('unreached');
   }
 
   const mF = document.getElementById('milestoneFResult');
   if (result.milestoneFYear !== null) {
-    mF.textContent = `Reached in year ${result.milestoneFYear}`;
+    mF.textContent = t.reachedYear(result.milestoneFYear);
     mF.classList.remove('unreached');
   } else {
-    mF.textContent = `Not reached within ${params.Y} years`;
+    mF.textContent = t.notReached(params.Y);
     mF.classList.add('unreached');
   }
 }
 
 // ----- Init -----
 
+buildFormatters();
+applyStaticTranslations();
+buildLanguageSelect();
 buildChart();
 bindInputPair('startingCapital', 'startingCapitalRange', update);
 bindInputPair('monthlyInvestment', 'monthlyInvestmentRange', update);
