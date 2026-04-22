@@ -61,25 +61,95 @@ function buildLanguageSelect() {
 
 // ----- Input wiring -----
 
-function bindInputPair(numberId, rangeId, onChange) {
+/**
+ * Pair a number input with a range slider, auto-expanding the slider's max
+ * (and shrinking when far below) so the user can always go further.
+ *
+ * opts: { hardMax, hardMin, growThreshold (0..1), growFactor, shrinkThreshold }
+ */
+function bindInputPair(numberId, rangeId, onChange, opts = {}) {
   const numberEl = document.getElementById(numberId);
   const rangeEl = document.getElementById(rangeId);
+
+  const initialMax = parseFloat(rangeEl.max);
+  const initialMin = parseFloat(rangeEl.min);
+  const stepNum = parseFloat(rangeEl.step) || 1;
+
+  const hardMax = opts.hardMax ?? Infinity;
+  const hardMin = opts.hardMin ?? -Infinity;
+  const growThreshold = opts.growThreshold ?? 0.85;
+  const growFactor = opts.growFactor ?? 2;
+  const shrinkThreshold = opts.shrinkThreshold ?? 0.25;
+
+  // Round a max value to a "nice" number based on step.
+  const niceMax = (v) => {
+    if (v <= 0) return initialMax;
+    const mag = Math.pow(10, Math.floor(Math.log10(v)));
+    return Math.min(hardMax, Math.ceil(v / mag) * mag);
+  };
+
+  // Resize the slider range based on a target value.
+  const resizeRange = (value) => {
+    let max = parseFloat(rangeEl.max);
+    let min = parseFloat(rangeEl.min);
+
+    // Grow upward when the value approaches the current max.
+    while (value >= max * growThreshold && max < hardMax) {
+      max = Math.min(hardMax, niceMax(max * growFactor));
+      if (parseFloat(rangeEl.max) === max) break;
+    }
+    // Shrink back toward the initial size if the value is well below the max.
+    while (
+      max > initialMax &&
+      value < (max / growFactor) * shrinkThreshold
+    ) {
+      const shrunk = Math.max(initialMax, niceMax(max / growFactor));
+      if (shrunk === max) break;
+      max = shrunk;
+    }
+
+    // Allow negative ranges (e.g. yearly return) to grow downward too.
+    while (value <= min + (max - min) * (1 - growThreshold) && min > hardMin) {
+      const span = max - min;
+      min = Math.max(hardMin, min - span);
+    }
+    while (
+      min < initialMin &&
+      value > min + (max - min) * (1 - shrinkThreshold)
+    ) {
+      const grown = Math.min(initialMin, min + (max - min) / 2);
+      if (grown === min) break;
+      min = grown;
+    }
+
+    if (parseFloat(rangeEl.max) !== max) rangeEl.max = max;
+    if (parseFloat(rangeEl.min) !== min) rangeEl.min = min;
+
+    if (numberEl.max !== '' && hardMax !== Infinity) numberEl.max = hardMax;
+    if (numberEl.min !== '' && hardMin !== -Infinity) numberEl.min = hardMin;
+  };
 
   const syncFromNumber = () => {
     const v = parseFloat(numberEl.value);
     if (!Number.isNaN(v)) {
-      const clamped = Math.min(Math.max(v, rangeEl.min), rangeEl.max);
-      rangeEl.value = clamped;
+      const clamped = Math.min(Math.max(v, hardMin), hardMax);
+      resizeRange(clamped);
+      rangeEl.value = Math.min(Math.max(clamped, parseFloat(rangeEl.min)), parseFloat(rangeEl.max));
     }
     onChange();
   };
   const syncFromRange = () => {
-    numberEl.value = rangeEl.value;
+    const v = parseFloat(rangeEl.value);
+    numberEl.value = Number.isInteger(stepNum) ? v : +v.toFixed(4);
+    resizeRange(v);
     onChange();
   };
 
   numberEl.addEventListener('input', syncFromNumber);
   rangeEl.addEventListener('input', syncFromRange);
+
+  // Initial sizing in case the default value is near the slider max.
+  resizeRange(parseFloat(numberEl.value));
 }
 
 function readParams() {
@@ -343,9 +413,9 @@ buildFormatters();
 applyStaticTranslations();
 buildLanguageSelect();
 buildChart();
-bindInputPair('startingCapital', 'startingCapitalRange', update);
-bindInputPair('monthlyInvestment', 'monthlyInvestmentRange', update);
-bindInputPair('yearlyReturn', 'yearlyReturnRange', update);
-bindInputPair('years', 'yearsRange', update);
-bindInputPair('factor', 'factorRange', update);
+bindInputPair('startingCapital', 'startingCapitalRange', update, { hardMin: 0, hardMax: 100_000_000 });
+bindInputPair('monthlyInvestment', 'monthlyInvestmentRange', update, { hardMin: 0, hardMax: 1_000_000 });
+bindInputPair('yearlyReturn', 'yearlyReturnRange', update, { hardMin: -50, hardMax: 100 });
+bindInputPair('years', 'yearsRange', update, { hardMin: 1, hardMax: 80 });
+bindInputPair('factor', 'factorRange', update, { hardMin: 0.1, hardMax: 100 });
 update();
