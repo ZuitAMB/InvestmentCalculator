@@ -2,7 +2,7 @@
 
 A small static investment calculator that runs entirely in your browser. No backend, no data collection.
 
-**[Live demo →](https://YOUR-USERNAME.github.io/InvestmentCalculator/)** *(update once GitHub Pages is enabled)*
+**[Live demo →](https://zuitamb.github.io/InvestmentCalculator/)**
 
 ## Features
 
